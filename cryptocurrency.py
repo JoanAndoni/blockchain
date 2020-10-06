@@ -9,7 +9,7 @@ import hashlib
 import json
 from flask import Flask, jsonify, request
 import requests
-from uuid import function
+from uuid import uuid4
 from urllib.parse import urlparse
 
 # Part 1 - Building a Blockchain
@@ -22,7 +22,9 @@ class Blockchain:
     # with the function defined in the same class
     def __init__(self):
         self.chain = []  # Define the chain empty
-        self.transactions = [] # Define the transactions before the creation of the block so they are inside the first block ¡The order matters!
+        self.transactions = (
+            []
+        )  # Define the transactions before the creation of the block so they are inside the first block ¡The order matters!
         self.create_block(proof=1, previous_hash="0")  # Create the first block
         self.nodes = set()
 
@@ -35,9 +37,11 @@ class Blockchain:
             "timestamp": str(datetime.datetime.now()),
             "proof": proof,
             "previous_hash": previous_hash,
-            "transactions": self.transactions 
+            "transactions": self.transactions,
         }
-        self.transactions = [] # Empty the list after putting the transactions in the block
+        self.transactions = (
+            []
+        )  # Empty the list after putting the transactions in the block
         self.chain.append(block)  # Add the new block to our chain
         return block
 
@@ -103,27 +107,49 @@ class Blockchain:
             block_index += 1
         # If there's nothing wrong then return true
         return True
-    
+
     # Function that add a transaction receiving as parameters the sender the receiver and the amount
     def add_transaction(self, sender, receiver, amount):
         # Append the transaction to the list of transactions in our blockchain "Mempool"
-        self.transactions.append({
-            'sender': sender,
-            'receiver': receiver,
-            'amount': amount
-        })
+        self.transactions.append(
+            {"sender": sender, "receiver": receiver, "amount": amount}
+        )
         previous_block = self.get_previous_block()
         # Return the index of the block that is going to be mined next
-        return previous_block['index'] + 1
-    
+        return previous_block["index"] + 1
+
     # Function that will add the node by the URL which it's the server running
     # and define add it in to our empty list
     def add_node(self, adress):
-        parsed_url = urlparse(adress) # Parse our adress so we can work with it
-        self.nodes.add(parsed_url.netloc) # Just add the simple adress to the list of nodes
-        
+        parsed_url = urlparse(adress)  # Parse our adress so we can work with it
+        self.nodes.add(
+            parsed_url.netloc
+        )  # Just add the simple adress to the list of nodes
+
+    # Function that will allow to replace the blockchain by a longest one checking
+    # each node in the chain and chain attached to it
     def replace_chain(self):
-        network = self.nodes 
+        network = self.nodes  # Get the chain that it's on
+        longest_chain = None
+        max_length = len(self.chain)  # Get the length of the proper chain
+        # Loop in the nodes of the network to verify whichone is the longest chain
+        for node in network:
+            # Get the chain per node and check their length
+            response = requests.get(f"http://{node}/get_chain")
+            if response.status == 200:
+                length = response.json()["length"]
+                chain = response.json()["chain"]
+                # Verify if other chain of the nodes is longer than the one we have
+                # and check if that chain is valid
+                if length > max_length and self.is_chain_valid(chain):
+                    max_length = length
+                    longest_chain = chain
+        # Check if there was a replacement
+        if longest_chain:
+            # Replace the chain that we have now for the longest valid one
+            self.chain = longest_chain
+            return True
+        return False
 
 
 # Part 2 - Mining our Blockchain
@@ -136,8 +162,12 @@ class Blockchain:
 #  * Running on http://127.0.0.1:5000/{route you implement}
 app = Flask(__name__)
 
+# Creating an adress for the node on Port 5000
+node_address = str(uuid4()).replace("-", "")
+
 # Creating a blockchain
 blockchain = Blockchain()
+
 
 @app.route("/mine_block", methods=["GET"])
 # Mine a block
@@ -150,6 +180,8 @@ def mine_block():
     proof = blockchain.proof_of_work(previous_proof)
     # Get the previous hash by making it with the previous block
     previous_hash = blockchain.hash(previous_block)
+    # Create the transactions
+    blockchain.add_transaction(sender=node_address, receiver="Hadelin", amount=1)
     # Create the new block after we have the correct proof
     block = blockchain.create_block(proof, previous_hash)
     # Create the response that we are going to return
@@ -159,6 +191,7 @@ def mine_block():
         "timestamp": block["timestamp"],
         "proof": block["proof"],
         "previous_hash": block["previous_hash"],
+        "transactions": block["transactions"],
     }
     # Return the http status plus the response made as json with the library jsonify
     return jsonify(response), 200
@@ -181,10 +214,8 @@ def is_valid():
         response = {"message": "We have a problem. The Blockchain is not valid."}
     return jsonify(response), 200
 
+
 # Part 3 - Descentralizing our blockchain
 
 
-
-
 app.run(host="0.0.0.0", port=5000)
-
